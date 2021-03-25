@@ -18,6 +18,8 @@ type StandAloneStorage struct {
 }
 
 type StandAloneStorageReader struct {
+	inner     *StandAloneStorage
+	iterCount int
 }
 
 func NewStandAloneStorage(conf *config.Config) *StandAloneStorage {
