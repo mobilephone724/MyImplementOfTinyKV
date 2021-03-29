@@ -1,6 +1,7 @@
 package engine_util
 
 import (
+	"fmt"
 	"os"
 
 	"github.com/Connor1996/badger"
@@ -60,6 +61,7 @@ func (en *Engines) Close() error {
 }
 
 func (en *Engines) Destroy() error {
+	fmt.Println("error")
 	if err := en.Close(); err != nil {
 		return err
 	}
@@ -79,6 +81,7 @@ func CreateDB(path string, raft bool) *badger.DB {
 		// Do not need to write blob for raft engine because it will be deleted soon.
 		opts.ValueThreshold = 0
 	}
+	fmt.Println(path)
 	opts.Dir = path
 	opts.ValueDir = opts.Dir
 	if err := os.MkdirAll(opts.Dir, os.ModePerm); err != nil {

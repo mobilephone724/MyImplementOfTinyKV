@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 
 	"github.com/pingcap-incubator/tinykv/kv/coprocessor"
@@ -43,7 +44,7 @@ func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kv
 	var err error
 	ans.Value, err = reader.GetCF(req.GetCf(), req.GetKey())
 	// ans.Error = err.Error()
-	if err != nil {
+	if bytes.Equal(ans.Value, []byte(nil)) {
 		ans.NotFound = true
 	}
 
@@ -74,7 +75,25 @@ func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest
 
 func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
 	// Your Code Here (1).
-	return nil, nil
+	var ans kvrpcpb.RawScanResponse
+	reader, _ := server.storage.Reader(nil)
+	itor := reader.IterCF(req.Cf)
+	index := 0
+	itor.Seek(req.StartKey)
+	for index < int(req.Limit) && itor.Valid() {
+		index++
+		itor.Next()
+	}
+	itor.Seek(req.StartKey)
+	ans.Kvs = make([]*kvrpcpb.KvPair, index)
+	for i := 0; i < index; {
+		v, _ := itor.Item().Value()
+		ans.Kvs[i] = &kvrpcpb.KvPair{Key: itor.Item().Key(),
+			Value: v}
+		i++
+		itor.Next()
+	}
+	return &ans, nil
 }
 
 // Raft commands (tinykv <-> tinykv)
