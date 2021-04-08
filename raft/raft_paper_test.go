@@ -51,6 +51,8 @@ func TestLeaderUpdateTermFromMessage2AA(t *testing.T) {
 // Reference: section 5.1
 func testUpdateTermFromMessage(t *testing.T, state StateType) {
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+	fmt.Println(state)
+	fmt.Println(r.State)
 	switch state {
 	case StateFollower:
 		r.becomeFollower(1, 2)
@@ -60,6 +62,7 @@ func testUpdateTermFromMessage(t *testing.T, state StateType) {
 		r.becomeCandidate()
 		r.becomeLeader()
 	}
+	fmt.Println(r.State)
 
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgAppend, Term: 2})
 
@@ -90,14 +93,13 @@ func TestLeaderBcastBeat2AA(t *testing.T) {
 	r := newTestRaft(1, []uint64{1, 2, 3}, 10, hi, NewMemoryStorage())
 	r.becomeCandidate()
 	r.becomeLeader()
-
 	r.Step(pb.Message{MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 	r.readMessages() // clear message
 
 	for i := 0; i < hi; i++ {
 		r.tick()
 	}
-
+	fmt.Println(r.Term)
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
 	wmsgs := []pb.Message{
@@ -106,6 +108,8 @@ func TestLeaderBcastBeat2AA(t *testing.T) {
 	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
+		fmt.Println(msgs)
+		fmt.Println(wmsgs)
 	}
 }
 
@@ -130,13 +134,15 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 	// election timeout
 	et := 10
 	r := newTestRaft(1, []uint64{1, 2, 3}, et, 1, NewMemoryStorage())
+	fmt.Println(r.State)
 	switch state {
 	case StateFollower:
 		r.becomeFollower(1, 2)
 	case StateCandidate:
 		r.becomeCandidate()
 	}
-
+	fmt.Println(r.State.String())
+	fmt.Println(r.Term)
 	for i := 1; i < 2*et; i++ {
 		r.tick()
 	}
@@ -188,6 +194,7 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 		{5, map[uint64]bool{}, StateCandidate},
 	}
 	for i, tt := range tests {
+		fmt.Println(i)
 		r := newTestRaft(1, idsBySize(tt.size), 10, 1, NewMemoryStorage())
 
 		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})

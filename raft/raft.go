@@ -113,6 +113,8 @@ type Raft struct {
 	Term uint64
 	Vote uint64
 
+	NumbersOfVote int
+
 	// the log
 	RaftLog *RaftLog
 
@@ -157,6 +159,8 @@ type Raft struct {
 	// value.
 	// (Used in 3A conf change)
 	PendingConfIndex uint64
+
+	peersId []uint64
 }
 
 // newRaft return a raft peer with the given config
@@ -164,51 +168,246 @@ func newRaft(c *Config) *Raft {
 	if err := c.validate(); err != nil {
 		panic(err.Error())
 	}
+	return &Raft{
+		id:               c.ID,
+		Term:             0,
+		Vote:             0,
+		RaftLog:          newLog(c.Storage),
+		Lead:             0,
+		votes:            make(map[uint64]bool),
+		heartbeatTimeout: c.HeartbeatTick,
+		electionTimeout:  c.ElectionTick + int(c.ID),
+		heartbeatElapsed: 0,
+		electionElapsed:  0,
+		leadTransferee:   0,
+		PendingConfIndex: c.Applied,
+		peersId:          c.peers,
+	}
 	// Your Code Here (2A).
-	return nil
 }
 
 // sendAppend sends an append RPC with new entries (if any) and the
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+	r.msgs = append(r.msgs,
+		pb.Message{
+			MsgType: pb.MessageType_MsgAppend,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+			LogTerm: r.RaftLog.logTerm,
+		})
 	return false
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	r.msgs = append(r.msgs,
+		pb.Message{
+			MsgType: pb.MessageType_MsgBeat,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+			LogTerm: r.RaftLog.logTerm,
+		})
 }
 
 // tick advances the internal logical clock by a single tick.
 func (r *Raft) tick() {
 	// Your Code Here (2A).
+	switch r.State {
+	case StateLeader:
+		r.heartbeatElapsed++
+		r.electionElapsed++
+		r.boardcastHeartBeat()
+	case StateFollower:
+		r.electionElapsed++
+		if r.electionElapsed >= r.electionTimeout {
+			r.becomeCandidate()
+			r.clearElapse()
+			r.startAVote(true)
+		}
+	case StateCandidate:
+		r.electionElapsed++
+		if r.electionElapsed >= r.electionTimeout {
+			r.clearElapse()
+			r.startAVote(false)
+		}
+	}
+
+}
+
+func (r *Raft) startAVote(firstVote bool) {
+	if !firstVote {
+		r.Term++
+	}
+	r.votes = make(map[uint64]bool)
+	for _, to := range r.peersId {
+		if to == r.id {
+			r.votes[r.id] = true
+			continue
+		}
+		r.msgs = append(r.msgs, pb.Message{
+			MsgType: pb.MessageType_MsgRequestVote,
+			From:    r.id,
+			To:      to,
+			Index:   0,
+			LogTerm: 0,
+			Term:    r.Term,
+		})
+	}
+}
+
+func (r *Raft) boardcastHeartBeat() {
+	for _, to := range r.peersId {
+		if to == r.id {
+			continue
+		}
+		r.msgs = append(r.msgs, pb.Message{
+			MsgType: pb.MessageType_MsgHeartbeat,
+			From:    r.id,
+			To:      to,
+			Index:   0,
+			LogTerm: 0,
+			Term:    r.Term,
+		})
+	}
+}
+
+func (r *Raft) clearElapse() {
+	r.electionElapsed = 0
+	r.heartbeatElapsed = 0
 }
 
 // becomeFollower transform this peer's state to Follower
 func (r *Raft) becomeFollower(term uint64, lead uint64) {
 	// Your Code Here (2A).
+	if r.Term < term {
+		r.Vote = 0
+		r.Term = term
+		r.Lead = lead
+		r.State = StateFollower
+	}
 }
 
 // becomeCandidate transform this peer's state to candidate
 func (r *Raft) becomeCandidate() {
 	// Your Code Here (2A).
+	if r.State == StateFollower {
+		r.State = StateCandidate
+		r.Term++
+	}
 }
 
 // becomeLeader transform this peer's state to leader
 func (r *Raft) becomeLeader() {
+	if r.State == StateCandidate {
+		r.State = StateLeader
+		for _, to := range r.peersId {
+			r.msgs = append(r.msgs, pb.Message{
+				MsgType: pb.MessageType_MsgPropose,
+				From:    r.id,
+				To:      to,
+				Index:   0,
+				LogTerm: 0,
+				Term:    r.Term,
+			})
+		}
+
+		// r.RaftLog.
+	}
 	// Your Code Here (2A).
 	// NOTE: Leader should propose a noop entry on its term
+}
+
+func (r *Raft) HandleVoteRequst(to uint64, isRejected bool) {
+	r.msgs = append(r.msgs,
+		pb.Message{
+			MsgType: pb.MessageType_MsgRequestVoteResponse,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+			LogTerm: r.RaftLog.logTerm,
+			Reject:  isRejected,
+		})
 }
 
 // Step the entrance of handle message, see `MessageType`
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
+	if m.Term < r.Term {
+		return nil
+	} else if m.Term > r.Term {
+		if m.MsgType == pb.MessageType_MsgAppend {
+			r.becomeFollower(m.Term, m.From)
+		}
+	}
+	r.Term = m.Term
 	switch r.State {
 	case StateFollower:
+		switch m.MsgType {
+		case pb.MessageType_MsgAppend:
+		case pb.MessageType_MsgHeartbeat:
+			r.clearElapse()
+			r.msgs = append(r.msgs,
+				pb.Message{
+					MsgType: pb.MessageType_MsgHeartbeatResponse,
+					To:      m.From,
+					From:    r.id,
+					Term:    r.Term,
+					LogTerm: r.RaftLog.logTerm,
+					Reject:  false,
+				})
+		case pb.MessageType_MsgPropose:
+			r.becomeFollower(m.Term, m.From)
+		case pb.MessageType_MsgRequestVote:
+			if r.Vote == 0 {
+				r.Vote = m.From
+				r.HandleVoteRequst(m.From, false)
+			}
+			r.HandleVoteRequst(m.From, true)
+		}
 	case StateCandidate:
+		switch m.MsgType {
+		case pb.MessageType_MsgHup:
+			r.startAVote(false)
+		case pb.MessageType_MsgRequestVote:
+			r.HandleVoteRequst(m.From, true)
+		case pb.MessageType_MsgRequestVoteResponse:
+			r.votes[m.From] = !m.Reject
+			if !m.Reject {
+				r.NumbersOfVote++
+				if r.NumbersOfVote > len(r.peersId)/2 {
+					r.becomeLeader()
+				}
+			}
+			// if(r.num)
+		case pb.MessageType_MsgPropose:
+			r.becomeFollower(m.Term, m.From)
+		}
 	case StateLeader:
+		switch m.MsgType {
+		case pb.MessageType_MsgRequestVote:
+			r.HandleVoteRequst(m.From, true)
+		case pb.MessageType_MsgBeat:
+			for _, id := range r.peersId {
+				r.msgs = append(r.msgs,
+					pb.Message{
+						MsgType: pb.MessageType_MsgHeartbeat,
+						To:      id,
+						From:    r.id,
+						Term:    r.Term,
+						LogTerm: r.RaftLog.logTerm,
+					})
+			}
+		case pb.MessageType_MsgHeartbeatResponse:
+		case pb.MessageType_MsgTransferLeader:
+		case pb.MessageType_MsgPropose:
+			r.becomeFollower(m.Term, m.From)
+		}
 	}
 	return nil
 }
