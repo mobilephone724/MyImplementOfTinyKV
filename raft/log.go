@@ -53,7 +53,6 @@ type RaftLog struct {
 	// (Used in 2C)
 	pendingSnapshot *pb.Snapshot
 
-	logTerm uint64
 	// Your Data Here (2A).
 }
 
@@ -66,9 +65,13 @@ func newLog(storage Storage) *RaftLog {
 		applied:         0,
 		stabled:         0,
 		pendingSnapshot: nil,
-		logTerm:         0,
 	}
 	// Your Code Here (2A).
+}
+
+func (l *RaftLog) LogTerm() uint64 {
+	ans, _ := l.storage.Term(l.LastIndex())
+	return ans
 }
 
 // We need to compact the log entries in some point of time like
@@ -93,7 +96,9 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return uint64(len(l.entries)) - 1
+	lastIndex, _ := l.storage.LastIndex()
+	return lastIndex
+
 }
 
 // Term return the term of the entry in the given index

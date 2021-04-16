@@ -202,7 +202,7 @@ func (r *Raft) sendAppend(to uint64) bool {
 			To:      to,
 			From:    r.id,
 			Term:    r.Term,
-			LogTerm: r.RaftLog.logTerm,
+			LogTerm: r.RaftLog.LogTerm(),
 		})
 	return false
 }
@@ -216,7 +216,7 @@ func (r *Raft) sendHeartbeat(to uint64) {
 			To:      to,
 			From:    r.id,
 			Term:    r.Term,
-			LogTerm: r.RaftLog.logTerm,
+			LogTerm: r.RaftLog.LogTerm(),
 		})
 }
 
@@ -339,8 +339,8 @@ func (r *Raft) becomeLeader() {
 				MsgType: pb.MessageType_MsgPropose,
 				From:    r.id,
 				To:      to,
-				Index:   0,
-				LogTerm: 0,
+				Index:   r.RaftLog.LastIndex(),
+				LogTerm: r.RaftLog.LogTerm(),
 				Term:    r.Term,
 			})
 		}
@@ -357,7 +357,7 @@ func (r *Raft) HandleVoteRequst(to uint64, isRejected bool) {
 			To:      to,
 			From:    r.id,
 			Term:    r.Term,
-			LogTerm: r.RaftLog.logTerm,
+			LogTerm: r.RaftLog.LogTerm(),
 			Reject:  isRejected,
 		})
 }
@@ -366,6 +366,12 @@ func (r *Raft) HandleVoteRequst(to uint64, isRejected bool) {
 // on `eraftpb.proto` for what msgs should be handled
 func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
+
+	if m.MsgType == pb.MessageType_MsgHup {
+		r.becomeCandidate()
+		r.startAVote(true)
+	}
+
 	if m.Term < r.Term {
 		return nil
 	}
@@ -378,9 +384,9 @@ func (r *Raft) Step(m pb.Message) error {
 			r.Vote = 0
 		}
 		switch m.MsgType {
-		case pb.MessageType_MsgHup:
-			r.becomeCandidate()
-			r.startAVote(true)
+		// case pb.MessageType_MsgHup:
+		// 	r.becomeCandidate()
+		// 	r.startAVote(true)
 		case pb.MessageType_MsgAppend:
 		case pb.MessageType_MsgHeartbeat:
 			r.clearElapse()
@@ -390,13 +396,13 @@ func (r *Raft) Step(m pb.Message) error {
 					To:      m.From,
 					From:    r.id,
 					Term:    r.Term,
-					LogTerm: r.RaftLog.logTerm,
+					LogTerm: r.RaftLog.LogTerm(),
 					Reject:  false,
 				})
 		case pb.MessageType_MsgPropose:
 			r.becomeFollower(m.Term, m.From)
 		case pb.MessageType_MsgRequestVote:
-			if r.Vote == 0 || r.Vote == m.From {
+			if (r.Vote == 0 || r.Vote == m.From) && (r.RaftLog.LogTerm() < m.LogTerm || (r.RaftLog.LogTerm() == m.LogTerm && r.RaftLog.LastIndex() <= m.Index)) {
 				r.Vote = m.From
 				r.HandleVoteRequst(m.From, false)
 			} else {
@@ -405,6 +411,12 @@ func (r *Raft) Step(m pb.Message) error {
 		}
 	case StateCandidate:
 		if r.Term <= m.Term {
+			if r.Term < m.Term {
+				if m.MsgType == pb.MessageType_MsgRequestVote {
+					r.becomeFollower(m.Term, m.From)
+					return r.Step(m)
+				}
+			}
 			r.Term = m.Term
 			if m.MsgType == pb.MessageType_MsgAppend {
 				r.becomeFollower(m.Term, m.From)
@@ -412,8 +424,8 @@ func (r *Raft) Step(m pb.Message) error {
 			}
 		}
 		switch m.MsgType {
-		case pb.MessageType_MsgHup:
-			r.startAVote(false)
+		// case pb.MessageType_MsgHup:
+		// 	r.startAVote(false)
 		case pb.MessageType_MsgRequestVote:
 			r.HandleVoteRequst(m.From, true)
 		case pb.MessageType_MsgRequestVoteResponse:
@@ -432,6 +444,7 @@ func (r *Raft) Step(m pb.Message) error {
 		if r.Term < m.Term {
 			r.Term = m.Term
 			r.becomeFollower(m.Term, m.From)
+			return r.Step(m)
 		}
 		switch m.MsgType {
 		case pb.MessageType_MsgRequestVote:
@@ -444,13 +457,13 @@ func (r *Raft) Step(m pb.Message) error {
 						To:      id,
 						From:    r.id,
 						Term:    r.Term,
-						LogTerm: r.RaftLog.logTerm,
+						LogTerm: r.RaftLog.LogTerm(),
 					})
 			}
 		case pb.MessageType_MsgHeartbeatResponse:
 		case pb.MessageType_MsgTransferLeader:
 		case pb.MessageType_MsgPropose:
-			r.becomeFollower(m.Term, m.From)
+			// r.becomeFollower(m.Term, m.From)
 		}
 	}
 	return nil
