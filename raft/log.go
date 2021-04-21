@@ -15,8 +15,6 @@
 package raft
 
 import (
-	"errors"
-
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
 )
 
@@ -59,13 +57,17 @@ type RaftLog struct {
 // newLog returns log using the given storage. It recovers the log
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
-	return &RaftLog{
+	res := RaftLog{
 		storage:         storage,
 		committed:       0,
 		applied:         0,
 		stabled:         0,
 		pendingSnapshot: nil,
 	}
+	res.committed,_=storage.LastIndex()
+	fir,_:=storage.FirstIndex()
+	res.entries, _= storage.Entries(fir, res.committed+1)
+	return &res
 	// Your Code Here (2A).
 }
 
@@ -104,8 +106,8 @@ func (l *RaftLog) LastIndex() uint64 {
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	if i >= uint64(len(l.entries)) {
-		return 0, errors.New("index out of range")
-	}
-	return 0, nil
+	// if i>uint64(l.LastIndex())||i<uint64(l.storage.FirstIndex()-1){
+	// 	return 0, errors.New("index out of range")
+	// }
+	return l.storage.Term(i)
 }

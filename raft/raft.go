@@ -16,6 +16,7 @@ package raft
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 
 	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
@@ -368,8 +369,30 @@ func (r *Raft) Step(m pb.Message) error {
 	// Your Code Here (2A).
 
 	if m.MsgType == pb.MessageType_MsgHup {
-		r.becomeCandidate()
-		r.startAVote(true)
+		if r.State==StateFollower{
+			r.becomeCandidate()
+			r.startAVote(true)
+		}else if(r.State==StateCandidate){
+			r.startAVote(false)
+		}else{
+			return nil
+		}
+		
+	}
+	if m.MsgType == pb.MessageType_MsgBeat && r.State==StateLeader{
+		for _, id := range r.peersId {
+			if id!=r.id{
+				r.msgs = append(r.msgs,
+					pb.Message{
+						MsgType: pb.MessageType_MsgHeartbeat,
+						To:      id,
+						From:    r.id,
+						Term:    r.Term,
+						LogTerm: r.RaftLog.LogTerm(),
+					})
+			}
+			
+		}
 	}
 
 	if m.Term < r.Term {
@@ -421,6 +444,9 @@ func (r *Raft) Step(m pb.Message) error {
 			if m.MsgType == pb.MessageType_MsgAppend {
 				r.becomeFollower(m.Term, m.From)
 				return r.Step(m)
+			}else if m.MsgType == pb.MessageType_MsgHeartbeat{
+				r.becomeFollower(m.Term,m.From)
+				return r.Step(m)
 			}
 		}
 		switch m.MsgType {
@@ -450,6 +476,7 @@ func (r *Raft) Step(m pb.Message) error {
 		case pb.MessageType_MsgRequestVote:
 			r.HandleVoteRequst(m.From, true)
 		case pb.MessageType_MsgBeat:
+			fmt.Println("here")
 			for _, id := range r.peersId {
 				r.msgs = append(r.msgs,
 					pb.Message{

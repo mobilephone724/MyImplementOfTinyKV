@@ -674,6 +674,7 @@ func TestRecvMessageType_MsgRequestVote2AA(t *testing.T) {
 		// what the recipient node does when receiving a message with a
 		// different term number, so we simply initialize both term numbers to
 		// be the same.
+
 		lterm, err := sm.RaftLog.Term(sm.RaftLog.LastIndex())
 		if err != nil {
 			t.Fatalf("unexpected error %v", err)
